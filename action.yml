@@ -1,0 +1,76 @@
+name: "Ensure ECR Repository Exists"
+description: "Ensures an Amazon ECR repository exists, creating it if necessary. Requires AWS credentials to be configured."
+author: "KoalaOps"
+
+branding:
+  icon: "package"
+  color: "orange"
+
+inputs:
+  repository-name:
+    description: "The name of the ECR repository to ensure exists"
+    required: true
+  aws-region:
+    description: "The AWS region where the ECR repository should exist"
+    required: true
+
+outputs:
+  repository-exists:
+    description: "Whether the repository existed before this action ran"
+    value: ${{ steps.ensure-repo.outputs.repository-exists }}
+  repository-uri:
+    description: "The URI of the ECR repository"
+    value: ${{ steps.ensure-repo.outputs.repository-uri }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure ECR Repository Exists
+      id: ensure-repo
+      env:
+        AWS_REGION: ${{ inputs.aws-region }}
+        AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
+        REPO_NAME: ${{ inputs.repository-name }}
+      shell: bash
+      run: |
+        # Display configuration
+        echo "Ensuring ECR repository exists:"
+        echo "  AWS Region: $AWS_REGION"
+        echo "  Repository Name: $REPO_NAME"
+
+        # Validate inputs
+        if [ -z "$AWS_REGION" ] || [ -z "$REPO_NAME" ]; then
+          echo "❌ Missing required inputs. aws-region and repository-name are required."
+          exit 1
+        fi
+
+        # Check if the repository already exists, capture both output and error
+        repo_result=$(aws ecr describe-repositories --repository-names $REPO_NAME 2>&1 || true)
+
+        if [[ $repo_result == *"RepositoryNotFoundException"* ]]; then
+          # Repository does not exist, create it
+          echo "ℹ️ Repository '$REPO_NAME' does not exist. Creating it now."
+          if ! aws ecr create-repository --repository-name $REPO_NAME; then
+            echo "❌ Error creating ECR repository."
+            exit 1
+          fi
+          echo "✅ ECR repository created successfully."
+          echo "repository-exists=false" >> $GITHUB_OUTPUT
+        elif [[ $repo_result == *"AccessDeniedException"* ]]; then
+          # Access denied
+          echo "❌ Access denied to describe ECR repository. Check your AWS permissions."
+          exit 1
+        elif [[ $repo_result == *"repositories"* ]]; then
+          # Success response contains "repositories" - repo exists
+          echo "✅ Repository '$REPO_NAME' already exists. Skipping creation."
+          echo "repository-exists=true" >> $GITHUB_OUTPUT
+        else
+          # Other errors
+          echo "❌ Unexpected error checking repository: $repo_result"
+          exit 1
+        fi
+
+        # Get repository URI for output
+        repo_uri=$(aws ecr describe-repositories --repository-names $REPO_NAME --query 'repositories[0].repositoryUri' --output text)
+        echo "repository-uri=$repo_uri" >> $GITHUB_OUTPUT
+        echo "Repository URI: $repo_uri" 
