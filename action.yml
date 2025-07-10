@@ -4,7 +4,7 @@ author: "KoalaOps"
 
 branding:
   icon: "package"
-  color: "orange"
+  color: "purple"
 
 inputs:
   repository-name:
